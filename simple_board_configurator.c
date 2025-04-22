@@ -38,29 +38,28 @@ int main(int argc, const char *argv[]) {
     }
 
     dev_handle = libusb_open_device_with_vid_pid(ctx, VENDOR_ID, PRODUCT_ID);
+    int retval = 1;
     if (!dev_handle) {
         fprintf(stderr, "Failed to open device\n");
-        libusb_exit(ctx);
-        return 1;
+        goto exit_usb;
     }
+
+    bool reattach = false;
 
     if (libusb_kernel_driver_active(dev_handle, INTERFACE_ID)) {
         int detach_res = libusb_detach_kernel_driver(dev_handle, INTERFACE_ID);
         if (detach_res < 0) {
             fprintf(stderr, "Failed to detach kernel driver: %s\n", libusb_error_name(detach_res));
-            libusb_close(dev_handle);
-            libusb_exit(ctx);
-            return -1;
+            goto exit_close_usb;
         }
+        reattach = true;
     }
 
 
     rc = libusb_claim_interface(dev_handle, INTERFACE_ID);
     if (rc < 0) {
         fprintf(stderr, "Failed to claim interface: %s\n", libusb_error_name(rc));
-        libusb_close(dev_handle);
-        libusb_exit(ctx);
-        return 1;
+        goto exit_attach_driver;
     }
 
     // Data to send, extracted from the usbmon log
@@ -87,10 +86,7 @@ int main(int argc, const char *argv[]) {
     rc = libusb_interrupt_transfer(dev_handle, 0x04, data, sizeof(data_on), &transferred, TIMEOUT);
     if (rc < 0) {
         fprintf(stderr, "Failed to send data: %s\n", libusb_error_name(rc));
-        libusb_release_interface(dev_handle, INTERFACE_ID);
-        libusb_close(dev_handle);
-        libusb_exit(ctx);
-        return 1;
+        goto exit_release_interface;
     }
     printf("Data sent successfully, %d bytes transferred\n", transferred);
 
@@ -99,6 +95,7 @@ int main(int argc, const char *argv[]) {
     rc = libusb_bulk_transfer(dev_handle, 0x80|0x06, response, sizeof(response), &transferred, TIMEOUT);
     if (rc < 0) {
         fprintf(stderr, "Failed to read response: %s\n", libusb_error_name(rc));
+        goto exit_release_interface;
     } else {
         printf("Response received (%d bytes):\n", transferred);
         for (int i = 0; i < transferred; i++) {
@@ -107,8 +104,17 @@ int main(int argc, const char *argv[]) {
         printf("\n");
     }
 
+    retval = 0;
+
+exit_release_interface:
     libusb_release_interface(dev_handle, INTERFACE_ID);
+exit_attach_driver:
+    if (reattach) {
+        libusb_attach_kernel_driver(dev_handle, INTERFACE_ID);
+    }
+exit_close_usb:
     libusb_close(dev_handle);
+exit_usb:
     libusb_exit(ctx);
-    return 0;
+    return retval;
 }
