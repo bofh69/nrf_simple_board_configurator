@@ -1,5 +1,5 @@
+use clap::{Arg, Command};
 use rusb::{Context, DeviceHandle, UsbContext};
-use std::env;
 use std::time::Duration;
 
 const VENDOR_ID: u16 = 0x1366;
@@ -7,23 +7,23 @@ const PRODUCT_ID: u16 = 0x1068;
 const TIMEOUT: Duration = Duration::from_millis(1000);
 const INTERFACE_ID: u8 = 5;
 
-fn usage(progname: &str) {
-    eprintln!("Usage: {} on|off", progname);
-}
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let matches = Command::new("nRF Simple Board Configurator")
+        .about("Turns on or off everything on the nRF54L15-DK board")
+        .arg(
+            Arg::new("action")
+                .help("Specify 'on' or 'off'")
+                .required(true)
+                .index(1),
+        )
+        .get_matches();
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
+    let action: &String = matches
+        .get_one("action")
+        .expect("Required argument missing");
 
-    if args.len() != 2 {
-        usage(&args[0]);
-        std::process::exit(1);
-    }
-
-    let turn_on = args[1] == "on";
-    let turn_off = args[1] == "off";
-    if !(turn_on || turn_off) {
-        usage(&args[0]);
-        std::process::exit(1);
+    if action != "on" && action != "off" {
+        return Err("Invalid action, expected 'on' or 'off'".into());
     }
 
     let context = match Context::new() {
@@ -56,22 +56,22 @@ fn main() {
         std::process::exit(1);
     }
 
-    let data_on: [u8; 64] = [
+    let mut data: [u8; 64] = [
         0x02, 0x00, 0x00, 0x15, 0x00, 0x40, 0x00, 0x00, 0x82, 0x8c, 0x06, 0xf5, 0x14, 0xf5, 0x16,
         0xf5, 0x17, 0xf5, 0x18, 0x2a, 0xf5, 0x18, 0x2d, 0xf5, 0x82, 0x01, 0x19, 0x0c, 0xe4, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00,
     ];
-    let data_off: [u8; 64] = [
-        0x02, 0x00, 0x00, 0x15, 0x00, 0x40, 0x00, 0x00, 0x82, 0x8c, 0x06, 0xf4, 0x14, 0xf4, 0x16,
-        0xf4, 0x17, 0xf4, 0x18, 0x2a, 0xf4, 0x18, 0x2d, 0xf4, 0x82, 0x01, 0x19, 0x0c, 0xe4, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00,
-    ];
+    if action == "off" {
+        for item in &mut data {
+            if *item == 0xf5 {
+                *item = 0xf4;
+            }
+        }
+    }
 
-    let data = if turn_on { &data_on } else { &data_off };
+    let data = &data;
 
     match device_handle.write_interrupt(0x04, data, TIMEOUT) {
         Ok(transferred) => {
@@ -101,6 +101,7 @@ fn main() {
     }
 
     cleanup(&mut device_handle);
+    Ok(())
 }
 
 fn cleanup<T: UsbContext>(device_handle: &mut DeviceHandle<T>) {
